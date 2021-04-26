@@ -60,7 +60,7 @@ module Pod
                     # platform frameworks. e.g. AFNetworking/AFNetworking-iOS/AFNetworking.framework
                     
                     target_folder = standard_sanbox.pod_dir(self.name)
-                    if target_names.count > 1 
+                    if target_names.count > 1
                         target_folder += real_file_folder.basename
                     end
                     target_folder.rmtree if target_folder.exist?
@@ -91,7 +91,7 @@ module Pod
                             make_link(object.real_file_path, object.target_file_path)
                         end
                     end
-                end # of for each 
+                end # of for each
 
             end # of method
 
@@ -117,8 +117,8 @@ module Pod
                 updated_names = PrebuildSandbox.from_standard_sandbox(self.sandbox).exsited_framework_pod_names
             else
                 added = changes.added
-                changed = changes.changed 
-                deleted = changes.deleted 
+                changed = changes.changed
+                deleted = changes.deleted
                 updated_names = added + changed + deleted
             end
 
@@ -198,20 +198,20 @@ module Pod
                     add_vendered_framework(spec, target.platform.name.to_s, framework_file_path)
                 end
                 # Clean the source files
-                # we just add the prebuilt framework to specific platform and set no source files 
+                # we just add the prebuilt framework to specific platform and set no source files
                 # for all platform, so it doesn't support the sence that 'a pod perbuild for one
                 # platform and not for another platform.'
                 empty_source_files(spec)
 
-                # to remove the resurce bundle target. 
-                # When specify the "resource_bundles" in podspec, xcode will generate a bundle 
+                # to remove the resurce bundle target.
+                # When specify the "resource_bundles" in podspec, xcode will generate a bundle
                 # target after pod install. But the bundle have already built when the prebuit
                 # phase and saved in the framework folder. We will treat it as a normal resource
                 # file.
                 # https://github.com/leavez/cocoapods-binary/issues/29
                 if spec.attributes_hash["resource_bundles"]
                     bundle_names = spec.attributes_hash["resource_bundles"].keys
-                    spec.attributes_hash["resource_bundles"] = nil 
+                    spec.attributes_hash["resource_bundles"] = nil
                     spec.attributes_hash["resources"] ||= []
                     spec.attributes_hash["resources"] += bundle_names.map{|n| n+".bundle"}
                 end
@@ -250,7 +250,7 @@ end
 # A fix in embeded frameworks script.
 #
 # The framework file in pod target folder is a symblink. The EmbedFrameworksScript use `readlink`
-# to read the read path. As the symlink is a relative symlink, readlink cannot handle it well. So 
+# to read the read path. As the symlink is a relative symlink, readlink cannot handle it well. So
 # we override the `readlink` to a fixed version.
 #
 module Pod
@@ -269,14 +269,14 @@ module Pod
                     # If the path isn't an absolute path, we add a realtive prefix.
                     old_read_link=`which readlink`
                     readlink () {
-                        path=`$old_read_link $1`;
+                        path=`$old_read_link "$1"`;
                         if [ $(echo "$path" | cut -c 1-1) = '/' ]; then
                             echo $path;
                         else
                             echo "`dirname $1`/$path";
                         fi
                     }
-                    # --- 
+                    # ---
                 SH
 
                 # patch the rsync for copy dSYM symlink
@@ -287,3 +287,77 @@ module Pod
         end
     end
 end
+    
+module Pod
+     module Generator
+         class CopydSYMsScript
+             old_method = instance_method(:generate)
+             define_method(:generate) do
+                 script = old_method.bind(self).()
+                 script = script.gsub(/-av/, "-r -L -p -t -g -o -D -v")
+             end
+         end
+     end
+ end
+
+ module Pod
+     module Generator
+         class CopyXCFrameworksScript
+             old_method = instance_method(:script)
+             define_method(:script) do
+                 script = old_method.bind(self).()
+                 script = script.gsub(/-av/, "-r -L -p -t -g -o -D -v")
+             end
+         end
+     end
+ end
+
+ Pod::Installer::Xcode::PodsProjectGenerator::PodTargetInstaller.define_singleton_method(:dsym_paths) do |target|
+     dsym_paths = target.framework_paths.values.flatten.reject { |fmwk_path| fmwk_path.dsym_path.nil? }.map(&:dsym_path)
+     dsym_paths.concat(target.xcframeworks.values.flatten.flat_map { |xcframework| xcframework_dsyms(xcframework.path) })
+     dsym_paths.uniq
+ end
+
+ module Pod
+     class Installer
+         class Xcode
+             class PodsProjectGenerator
+                 class PodTargetIntegrator
+                     old_method = instance_method(:add_copy_xcframeworks_script_phase)
+                     define_method(:add_copy_xcframeworks_script_phase) do |native_target|
+                         script_path = "${PODS_ROOT}/#{target.copy_xcframeworks_script_path.relative_path_from(target.sandbox.root)}"
+
+                         input_paths_by_config = {}
+                         output_paths_by_config = {}
+
+                         xcframeworks = target.xcframeworks.values.flatten
+
+                         if use_input_output_paths? && !xcframeworks.empty?
+                             input_file_list_path = target.copy_xcframeworks_script_input_files_path
+                             input_file_list_relative_path = "${PODS_ROOT}/#{input_file_list_path.relative_path_from(target.sandbox.root)}"
+                             input_paths_key = UserProjectIntegrator::TargetIntegrator::XCFileListConfigKey.new(input_file_list_path, input_file_list_relative_path)
+                             input_paths = input_paths_by_config[input_paths_key] = []
+
+                             framework_paths = xcframeworks.map { |xcf| "${PODS_ROOT}/#{xcf.path.relative_path_from(target.sandbox.root)}" }
+                             input_paths.concat framework_paths
+
+                             output_file_list_path = target.copy_xcframeworks_script_output_files_path
+                             output_file_list_relative_path = "${PODS_ROOT}/#{output_file_list_path.relative_path_from(target.sandbox.root)}"
+                             output_paths_key = UserProjectIntegrator::TargetIntegrator::XCFileListConfigKey.new(output_file_list_path, output_file_list_relative_path)
+                             output_paths_by_config[output_paths_key] = xcframeworks.map do |xcf|
+                                 "#{Target::BuildSettings::XCFRAMEWORKS_BUILD_DIR_VARIABLE}/#{xcf.name}"
+                             end
+                         end
+
+                         if xcframeworks.empty?
+                             UserProjectIntegrator::TargetIntegrator.remove_copy_xcframeworks_script_phase_from_target(native_target)
+                         else
+                             UserProjectIntegrator::TargetIntegrator.create_or_update_copy_xcframeworks_script_phase_to_target(
+                                 native_target, script_path, input_paths_by_config, output_paths_by_config)
+                         end
+                     end
+                 end
+             end
+         end
+     end
+ end
