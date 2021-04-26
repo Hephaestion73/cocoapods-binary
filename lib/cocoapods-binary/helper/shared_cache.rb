@@ -13,14 +13,14 @@ module Pod
             #
             # @return [Boolean]
             def self.has?(target, options)
-                has_local_cache_for(target, options) || has_s3_cache_for(target, options)
+                Pod.Prebuild.SharedCache.has_local_cache_for?(target, options) || Pod.Prebuild.SharedCache.has_s3_cache_for?(target, options)
             end
 
             # `true` if there is local cache for the target
             # `false` otherwise
             #
             # @return [Boolean]
-            def self.class.has_local_cache_for?(target, options)
+            def self.has_local_cache_for?(target, options)
                 if Podfile::DSL.shared_cache_enabled
                     path = local_framework_cache_path_for(target, options)
                     path.exist?
@@ -33,7 +33,7 @@ module Pod
             # `false` otherwise
             #
             # @return [Boolean]
-            def self.class.has_s3_cache_for?(target, options)
+            def self.has_s3_cache_for?(target, options)
                 result = false
                 if Podfile::DSL.shared_s3_cache_enabled
                     s3_cache_path = s3_framework_cache_path_for(target, options)
