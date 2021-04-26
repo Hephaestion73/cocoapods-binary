@@ -12,7 +12,7 @@ module Pod
             # `false` otherwise
             #
             # @return [Boolean]
-            def has?(target, options)
+            def self.has?(target, options)
                 has_local_cache_for(target, options) || has_s3_cache_for(target, options)
             end
 
